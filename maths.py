@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import os
 from io import BytesIO
 import google.generativeai as genai
@@ -107,9 +109,120 @@ def explain_calculation(title, formula, variables, result, reasoning):
     **Why this matters:** {reasoning}
     """)
 
+def create_top_performers_chart(df, metric, title, unit, ascending=True):
+    """Creates a horizontal bar chart for top/bottom performers"""
+    top_10 = df.nlargest(10, metric) if not ascending else df.nsmallest(10, metric)
+    
+    fig = px.bar(
+        top_10, 
+        x=metric, 
+        y='Trust Name',
+        orientation='h',
+        title=title,
+        color=metric,
+        color_continuous_scale='RdYlGn_r' if not ascending else 'RdYlGn'
+    )
+    
+    fig.update_layout(
+        height=500,
+        yaxis={'categoryorder': 'total ascending' if ascending else 'total descending'},
+        xaxis_title=unit,
+        showlegend=False
+    )
+    
+    return fig, top_10
+
+def create_efficiency_distribution_chart(df):
+    """Creates efficiency distribution pie chart"""
+    efficiency_counts = df['Clustering Efficiency Label'].value_counts()
+    
+    colors = {
+        'Efficient': '#2E8B57',
+        'Moderate': '#FFD700', 
+        'High-Risk': '#DC143C',
+        'No Benchmark': '#808080'
+    }
+    
+    fig = px.pie(
+        values=efficiency_counts.values,
+        names=efficiency_counts.index,
+        title='Trust Efficiency Distribution',
+        color=efficiency_counts.index,
+        color_discrete_map=colors
+    )
+    
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+    fig.update_layout(height=400)
+    
+    return fig
+
+def create_trust_type_comparison(df):
+    """Creates trust type comparison box plot"""
+    if 'Trust Type' not in df.columns:
+        return None
+        
+    fig = px.box(
+        df, 
+        x='Trust Type', 
+        y='Energy per m² (kWh/m²)',
+        title='Energy Consumption Distribution by Trust Type',
+        color='Trust Type'
+    )
+    
+    fig.update_layout(
+        height=500,
+        xaxis_tickangle=-45,
+        showlegend=False
+    )
+    
+    return fig
+
+def create_correlation_heatmap(df):
+    """Creates correlation heatmap for key metrics"""
+    numeric_cols = [
+        'Energy per m² (kWh/m²)', 
+        'CO₂ per m² (tCO₂/m²)', 
+        'cost_per_kWh',
+        'Bed Count',
+        'Gross internal floor area (m²)'
+    ]
+    
+    available_cols = [col for col in numeric_cols if col in df.columns]
+    corr_matrix = df[available_cols].corr()
+    
+    fig = px.imshow(
+        corr_matrix,
+        title='Correlation Matrix of Key Metrics',
+        color_continuous_scale='RdBu',
+        aspect='auto'
+    )
+    
+    fig.update_layout(height=500)
+    return fig
+
+def create_savings_potential_chart(df):
+    """Creates savings potential visualization"""
+    top_savings = df.nlargest(15, 'Potential Cost Saved (£)')
+    
+    fig = px.bar(
+        top_savings,
+        x='Trust Name',
+        y='Potential Cost Saved (£)',
+        title='Top 15 Trusts by Cost Savings Potential',
+        color='Potential Cost Saved (£)',
+        color_continuous_scale='Greens'
+    )
+    
+    fig.update_layout(
+        height=500,
+        xaxis_tickangle=-45,
+        showlegend=False
+    )
+    
+    return fig, top_savings
 
 def page_data_preprocessing():
-    st.title("Data Preprocessing")
+    st.title("📊 Data Preprocessing")
     st.markdown("Upload ERIC Site and ERIC Trust CSV files to begin analysis.")
 
     st.info("""
@@ -239,35 +352,50 @@ def page_data_preprocessing():
                 merged_data = calculate_kpis(merged_data)
 
                 st.session_state.processed_data = merged_data
-                st.success("Data processed successfully!")
-                st.dataframe(merged_data.head())
+                st.success("✅ Data processed successfully!")
+                
+                # Show data preview
+                st.subheader("📋 Data Preview")
+                st.dataframe(merged_data.head(), use_container_width=True)
 
                 # Download processed data
                 csv = convert_df_to_csv(merged_data)
                 st.download_button(
-                    label="Download Processed Data",
+                    label="📥 Download Processed Data",
                     data=csv,
                     file_name="processed_nhs_data.csv",
                     mime="text/csv"
                 )
 
         except Exception as e:
-            st.error(f"Error during processing: {e}")
+            st.error(f"❌ Error during processing: {e}")
 
 
 def page_overview(df):
-    st.title("Mathematical Overview")
+    st.title("📈 Mathematical Overview")
     st.markdown("**Problem Statement:** Calculate key performance indicators for NHS Trust efficiency analysis")
     
-    # Problem 1: Basic Counts and Totals
-    st.subheader("Problem 1: Basic Calculations")
-    st.markdown("**Given:** Dataset of NHS Trust performance metrics")
-    st.markdown("**Find:** Total counts and sums")
+    # Key Metrics Cards
+    col1, col2, col3, col4 = st.columns(4)
     
     total_trusts = df['Trust Name'].nunique()
     total_energy_kwh = df['Total Energy (kWh)'].sum()
     total_cost_pounds = df['Total Costs (£)'].sum()
     total_co2_tonnes = df['Total CO₂ (tCO₂e)'].sum()
+    
+    with col1:
+        st.metric("Total Trusts", f"{total_trusts:,}")
+    with col2:
+        st.metric("Total Energy", f"{total_energy_kwh/1e6:,.1f} GWh")
+    with col3:
+        st.metric("Total Costs", f"£{total_cost_pounds/1e6:,.1f}M")
+    with col4:
+        st.metric("Total CO₂", f"{total_co2_tonnes/1e3:,.1f} ktCO₂e")
+    
+    # Problem 1: Basic Counts and Totals
+    st.subheader("Problem 1: Basic Calculations")
+    st.markdown("**Given:** Dataset of NHS Trust performance metrics")
+    st.markdown("**Find:** Total counts and sums")
     
     st.markdown("**Solution:**")
     st.markdown(f"• Total Trusts = {total_trusts:,}")
@@ -275,47 +403,18 @@ def page_overview(df):
     st.markdown(f"• Total Costs = Σ(Total Costs) = £{total_cost_pounds:,.0f}")
     st.markdown(f"• Total CO₂ = Σ(Total CO₂) = {total_co2_tonnes:,.0f} tCO₂e")
     
-    explain_calculation(
-        "Why These Totals Matter",
-        "System Total = Σ(Individual Trust Values)",
-        f"• {total_trusts} trusts represent the NHS hospital system\n• Each trust contributes to national energy consumption",
-        f"Complete picture of NHS energy footprint",
-        "These totals establish the baseline for the NHS hospital system's energy consumption, costs, and carbon emissions."
-    )
-    
-    # Problem 2: Unit Conversions
-    st.subheader("Problem 2: Unit Conversions")
-    st.markdown("**Given:** Totals in base units")
-    st.markdown("**Find:** Convert to larger units for readability")
-    
-    total_energy_gwh = total_energy_kwh / 1e6
-    total_cost_m = total_cost_pounds / 1e6
-    total_co2_kt = total_co2_tonnes / 1e3
-    
-    st.markdown("**Solution:**")
-    st.markdown(f"• Energy in GWh = {total_energy_kwh:,.0f} kWh ÷ 1,000,000 = {total_energy_gwh:,.1f} GWh")
-    st.markdown(f"• Cost in Millions = £{total_cost_pounds:,.0f} ÷ 1,000,000 = £{total_cost_m:,.1f}M")
-    st.markdown(f"• CO₂ in Kilotonnes = {total_co2_tonnes:,.0f} tCO₂e ÷ 1,000 = {total_co2_kt:,.1f} ktCO₂e")
-    
-    explain_calculation(
-        "Unit Conversion Logic",
-        "Large Unit = Small Unit ÷ Conversion Factor",
-        f"• GWh = Gigawatt-hours (10⁶ kWh)\n• £M = Millions of pounds (10⁶ £)\n• ktCO₂e = Kilotonnes CO₂ equivalent (10³ tonnes)",
-        f"More readable large-scale figures",
-        "Large numbers are easier to comprehend when converted to appropriate units."
-    )
-    
-    # Problem 3: Efficiency Distribution
-    st.subheader("Problem 3: Efficiency Classification")
-    st.markdown("**Given:** Efficiency labels based on energy performance")
-    st.markdown("**Find:** Count of trusts in each category")
+    # Efficiency Distribution Visualization
+    st.subheader("📊 Trust Efficiency Distribution")
+    efficiency_fig = create_efficiency_distribution_chart(df)
+    st.plotly_chart(efficiency_fig, use_container_width=True)
     
     efficiency_counts = df['Clustering Efficiency Label'].value_counts()
     
-    st.markdown("**Solution:**")
+    st.markdown("**Efficiency Analysis:**")
     for label, count in efficiency_counts.items():
         percentage = (count / total_trusts) * 100
-        st.markdown(f"• {label}: {count} trusts ({percentage:.1f}%)")
+        emoji = "🟢" if label == "Efficient" else "🟡" if label == "Moderate" else "🔴"
+        st.markdown(f"• {emoji} **{label}**: {count} trusts ({percentage:.1f}%)")
     
     explain_calculation(
         "Efficiency Classification Method",
@@ -325,171 +424,183 @@ def page_overview(df):
         "This classification identifies trusts needing urgent attention or performing well."
     )
     
-    # Problem 4: Savings Potential by Trust Type
-    st.subheader("Problem 4: Savings Analysis by Trust Type")
-    st.markdown("**Given:** Potential cost savings per trust")
-    st.markdown("**Find:** Total savings potential grouped by trust type")
-    
+    # Trust Type Comparison
     if 'Trust Type' in df.columns:
-        savings_by_type = df.groupby('Trust Type')['Potential Cost Saved (£)'].sum().sort_values(ascending=False)
+        st.subheader("🏥 Trust Type Performance Comparison")
+        trust_type_fig = create_trust_type_comparison(df)
+        if trust_type_fig:
+            st.plotly_chart(trust_type_fig, use_container_width=True)
         
-        st.markdown("**Solution:**")
-        for trust_type, savings in savings_by_type.items():
-            st.markdown(f"• {trust_type}: £{savings:,.0f}")
+        # Trust type statistics
+        trust_type_stats = df.groupby('Trust Type').agg({
+            'Energy per m² (kWh/m²)': ['mean', 'count'],
+            'Potential Cost Saved (£)': 'sum'
+        }).round(1)
         
-        explain_calculation(
-            "Savings Potential Calculation",
-            "Potential Savings = (Actual - Target) × Floor Area × Cost per kWh",
-            f"• Only positive deviations count\n• Multiply by floor area to get total kWh savings",
-            f"Financial impact of efficiency improvements",
-            "This shows the financial benefit if trusts performed at their peer group median."
-        )
+        st.markdown("**Trust Type Analysis:**")
+        for trust_type in trust_type_stats.index:
+            avg_energy = trust_type_stats.loc[trust_type, ('Energy per m² (kWh/m²)', 'mean')]
+            count = trust_type_stats.loc[trust_type, ('Energy per m² (kWh/m²)', 'count')]
+            savings = trust_type_stats.loc[trust_type, ('Potential Cost Saved (£)', 'sum')]
+            st.markdown(f"• **{trust_type}** ({count} trusts): {avg_energy:.1f} kWh/m² avg, £{savings:,.0f} savings potential")
 
 def page_energy(df):
-    st.title("Energy Mathematics")
+    st.title("⚡ Energy Mathematics")
     st.markdown("**Problem Set:** Energy consumption analysis and statistical calculations")
     
-    # Problem 1: Central Tendency
-    st.subheader("Problem 1: Central Tendency Measures")
-    st.markdown("**Given:** Energy per m² values for all trusts")
-    st.markdown("**Find:** Mean, median, and total potential savings")
-    
+    # Key Energy Metrics
     energy_values = df['Energy per m² (kWh/m²)'].dropna()
     avg_e_per_m2 = energy_values.mean()
     median_e_per_m2 = energy_values.median()
     total_potential_e_saved = df['Potential Energy Saved (kWh)'].sum()
     
-    st.markdown("**Solution:**")
-    st.markdown(f"• Mean = {avg_e_per_m2:,.1f} kWh/m²")
-    st.markdown(f"• Median = {median_e_per_m2:,.1f} kWh/m²")
-    st.markdown(f"• Total Potential Savings = {total_potential_e_saved:,.0f} kWh = {total_potential_e_saved/1e6:,.2f} GWh")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Average Energy", f"{avg_e_per_m2:,.1f} kWh/m²")
+    with col2:
+        st.metric("Median Energy", f"{median_e_per_m2:,.1f} kWh/m²")
+    with col3:
+        st.metric("Potential Savings", f"{total_potential_e_saved/1e6:,.1f} GWh")
+    with col4:
+        min_energy = energy_values.min()
+        max_energy = energy_values.max()
+        st.metric("Energy Range", f"{max_energy - min_energy:,.1f} kWh/m²")
     
-    explain_calculation(
-        "Why Mean vs Median Matter",
-        "Mean = Average; Median = Middle Value",
-        f"• Mean = {avg_e_per_m2:,.1f} kWh/m²\n• Median = {median_e_per_m2:,.1f} kWh/m²",
-        f"Central tendency comparison",
-        f"The {'mean > median' if avg_e_per_m2 > median_e_per_m2 else 'median > mean'} suggests the data is {'right-skewed' if avg_e_per_m2 > median_e_per_m2 else 'left-skewed'}."
+    # Top Energy Consumers
+    st.subheader("🔥 Highest Energy Consumers")
+    energy_fig, top_energy = create_top_performers_chart(
+        df, 'Energy per m² (kWh/m²)', 
+        'Top 10 Trusts by Energy Consumption per m²', 
+        'kWh/m²', 
+        ascending=False
     )
+    st.plotly_chart(energy_fig, use_container_width=True)
     
-    # Problem 2: Range and Distribution
-    st.subheader("Problem 2: Range Analysis")
-    st.markdown("**Given:** Energy consumption data")
-    st.markdown("**Find:** Minimum, maximum, and range")
+    # Highlight top consumer
+    if len(top_energy) > 0:
+        top_consumer = top_energy.iloc[0]
+        st.warning(f"🚨 **Highest energy usage**: {top_consumer['Trust Name']} consumes {top_consumer['Energy per m² (kWh/m²)']:,.1f} kWh/m², which is {((top_consumer['Energy per m² (kWh/m²)'] / avg_e_per_m2) - 1) * 100:.1f}% above average!")
     
-    min_energy = energy_values.min()
-    max_energy = energy_values.max()
-    range_energy = max_energy - min_energy
-    std_energy = energy_values.std()
-    
-    st.markdown("**Solution:**")
-    st.markdown(f"• Minimum = {min_energy:,.1f} kWh/m²")
-    st.markdown(f"• Maximum = {max_energy:,.1f} kWh/m²")
-    st.markdown(f"• Range = {range_energy:,.1f} kWh/m²")
-    st.markdown(f"• Standard Deviation = {std_energy:,.1f} kWh/m²")
-    
-    explain_calculation(
-        "Variability Analysis",
-        "Range = Max - Min; Std Dev = √(Σ(x - μ)²/n)",
-        f"• Range = {range_energy:,.1f} kWh/m²\n• Std Dev = {std_energy:,.1f} kWh/m²",
-        f"Measure of data spread",
-        f"The large range ({range_energy:,.1f} kWh/m²) shows significant variation in energy performance."
+    # Most Efficient Trusts
+    st.subheader("🌟 Most Energy Efficient Trusts")
+    efficient_fig, top_efficient = create_top_performers_chart(
+        df, 'Energy per m² (kWh/m²)', 
+        'Top 10 Most Energy Efficient Trusts', 
+        'kWh/m²', 
+        ascending=True
     )
+    st.plotly_chart(efficient_fig, use_container_width=True)
     
-    # Problem 3: Trust Type Analysis
-    st.subheader("Problem 3: Group Statistics")
-    st.markdown("**Given:** Energy data grouped by Trust Type")
-    st.markdown("**Find:** Average energy consumption per trust type")
+    # Highlight most efficient
+    if len(top_efficient) > 0:
+        most_efficient = top_efficient.iloc[0]
+        st.success(f"⭐ **Most efficient**: {most_efficient['Trust Name']} uses only {most_efficient['Energy per m² (kWh/m²)']:,.1f} kWh/m², which is {((avg_e_per_m2 / most_efficient['Energy per m² (kWh/m²)']) - 1) * 100:.1f}% better than average!")
     
-    if 'Trust Type' in df.columns:
-        energy_by_type = df.groupby('Trust Type')['Energy per m² (kWh/m²)'].agg(['mean', 'count', 'std']).round(1)
-        
-        st.markdown("**Solution:**")
-        for trust_type, stats in energy_by_type.iterrows():
-            st.markdown(f"• {trust_type}: {stats['mean']:,.1f} kWh/m² (n={stats['count']}, σ={stats['std']:,.1f})")
-        
-        explain_calculation(
-            "Trust Type Differences",
-            "Group Mean = Σ(Group Values) ÷ Group Count",
-            f"• Different trust types have different energy needs",
-            f"Trust type benchmarking basis",
-            "Different trust types have different energy profiles due to varying equipment."
-        )
-    
-    # Create energy distribution chart
-    st.subheader("Energy Distribution Visualization")
-    fig = px.histogram(df, x='Energy per m² (kWh/m²)', nbins=30, 
-                      title='Distribution of Energy Consumption per m²')
+    # Energy Distribution
+    st.subheader("📊 Energy Consumption Distribution")
+    fig = px.histogram(
+        df, 
+        x='Energy per m² (kWh/m²)', 
+        nbins=30, 
+        title='Distribution of Energy Consumption per m²',
+        color_discrete_sequence=['#1f77b4']
+    )
     fig.add_vline(x=avg_e_per_m2, line_dash="dash", line_color="red", 
                   annotation_text=f"Mean: {avg_e_per_m2:.1f}")
     fig.add_vline(x=median_e_per_m2, line_dash="dash", line_color="green", 
                   annotation_text=f"Median: {median_e_per_m2:.1f}")
     st.plotly_chart(fig, use_container_width=True)
-
+    
+    # Statistical Analysis
+    st.subheader("📈 Statistical Analysis")
+    min_energy = energy_values.min()
+    max_energy = energy_values.max()
+    range_energy = max_energy - min_energy
+    std_energy = energy_values.std()
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Central Tendency:**")
+        st.markdown(f"• Mean = {avg_e_per_m2:,.1f} kWh/m²")
+        st.markdown(f"• Median = {median_e_per_m2:,.1f} kWh/m²")
+        st.markdown(f"• Mode = {energy_values.mode().iloc[0] if len(energy_values.mode()) > 0 else 'N/A'}")
+    
+    with col2:
+        st.markdown("**Variability:**")
+        st.markdown(f"• Range = {range_energy:,.1f} kWh/m²")
+        st.markdown(f"• Standard Deviation = {std_energy:,.1f} kWh/m²")
+        st.markdown(f"• Coefficient of Variation = {(std_energy/avg_e_per_m2)*100:.1f}%")
+    
+    explain_calculation(
+        "Energy Performance Insights",
+        "Performance Gap = (Individual - Benchmark) / Benchmark × 100%",
+        f"• Average consumption: {avg_e_per_m2:,.1f} kWh/m²\n• Best performer: {min_energy:,.1f} kWh/m²\n• Worst performer: {max_energy:,.1f} kWh/m²",
+        f"Wide variation indicates significant improvement opportunities",
+        f"The {range_energy:,.1f} kWh/m² range shows some trusts use {(max_energy/min_energy):.1f}x more energy per m² than others."
+    )
 
 def page_financial(df):
-    st.title("Financial Mathematics")
+    st.title("💰 Financial Mathematics")
     st.markdown("**Problem Set:** Cost analysis and financial calculations")
     
-    # Problem 1: Cost Metrics
-    st.subheader("Problem 1: Cost per Unit Analysis")
-    st.markdown("**Given:** Total costs and energy consumption")
-    st.markdown("**Find:** Average cost per kWh and total financial metrics")
-    
+    # Key Financial Metrics
     total_cost_pounds = df['Total Costs (£)'].sum()
     total_energy_kwh = df['Total Energy (kWh)'].sum()
     avg_cost_kwh = df['cost_per_kWh'].mean()
     weighted_avg_cost_kwh = total_cost_pounds / total_energy_kwh if total_energy_kwh > 0 else 0
     total_potential_savings = df['Potential Cost Saved (£)'].sum()
     
-    st.markdown("**Solution:**")
-    st.markdown(f"• Total Annual Costs = £{total_cost_pounds:,.0f}")
-    st.markdown(f"• Simple Average Cost per kWh = £{avg_cost_kwh:.3f}")
-    st.markdown(f"• Weighted Average Cost per kWh = £{weighted_avg_cost_kwh:.3f}")
-    st.markdown(f"• Total Potential Savings = £{total_potential_savings:,.0f}")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Annual Costs", f"£{total_cost_pounds/1e6:,.1f}M")
+    with col2:
+        st.metric("Avg Cost per kWh", f"£{avg_cost_kwh:.3f}")
+    with col3:
+        st.metric("Potential Savings", f"£{total_potential_savings/1e6:,.1f}M")
+    with col4:
+        st.metric("Savings %", f"{(total_potential_savings/total_cost_pounds)*100:.1f}%")
     
-    explain_calculation(
-        "Cost Analysis Methods",
-        "Simple Avg = Σ(Individual Costs/kWh) ÷ n; Weighted Avg = Total £ ÷ Total kWh",
-        f"• Simple average = £{avg_cost_kwh:.3f}\n• Weighted average = £{weighted_avg_cost_kwh:.3f}",
-        f"Two different cost perspectives",
-        "Weighted average accounts for consumption size."
+    # Cost Savings Potential
+    st.subheader("💡 Highest Cost Savings Potential")
+    savings_fig, top_savings = create_savings_potential_chart(df)
+    st.plotly_chart(savings_fig, use_container_width=True)
+    
+    # Highlight top savings opportunity
+    if len(top_savings) > 0:
+        top_saver = top_savings.iloc[0]
+        st.info(f"💰 **Biggest savings opportunity**: {top_saver['Trust Name']} could save £{top_saver['Potential Cost Saved (£)']:,.0f} annually through energy efficiency improvements!")
+    
+    # Highest Cost per kWh
+    st.subheader("💸 Highest Energy Costs per kWh")
+    cost_fig, top_costs = create_top_performers_chart(
+        df, 'cost_per_kWh', 
+        'Top 10 Trusts by Cost per kWh', 
+        '£/kWh', 
+        ascending=False
     )
+    st.plotly_chart(cost_fig, use_container_width=True)
     
-    # Problem 2: Cost Distribution
-    st.subheader("Problem 2: Cost Distribution Analysis")
-    st.markdown("**Given:** Cost per kWh for all trusts")
-    st.markdown("**Find:** Statistical measures of cost distribution")
+    # Highlight highest cost
+    if len(top_costs) > 0:
+        highest_cost = top_costs.iloc[0]
+        st.warning(f"🚨 **Highest energy costs**: {highest_cost['Trust Name']} pays £{highest_cost['cost_per_kWh']:.3f} per kWh, which is {((highest_cost['cost_per_kWh'] / avg_cost_kwh) - 1) * 100:.1f}% above average!")
     
+    # Cost Distribution Analysis
+    st.subheader("📊 Cost Distribution Analysis")
     cost_values = df['cost_per_kWh'].dropna()
-    min_cost = cost_values.min()
-    max_cost = cost_values.max()
-    median_cost = cost_values.median()
-    std_cost = cost_values.std()
-    q1_cost = cost_values.quantile(0.25)
-    q3_cost = cost_values.quantile(0.75)
-    iqr_cost = q3_cost - q1_cost
     
-    st.markdown("**Solution:**")
-    st.markdown(f"• Minimum Cost = £{min_cost:.3f} per kWh")
-    st.markdown(f"• Maximum Cost = £{max_cost:.3f} per kWh")
-    st.markdown(f"• Median Cost = £{median_cost:.3f} per kWh")
-    st.markdown(f"• Standard Deviation = £{std_cost:.3f}")
-    st.markdown(f"• Interquartile Range = £{iqr_cost:.3f}")
-    
-    explain_calculation(
-        "Cost Variability Insights",
-        "IQR = Q3 - Q1",
-        f"• Range = £{max_cost - min_cost:.3f}\n• IQR = £{iqr_cost:.3f}",
-        f"Cost variation analysis",
-        f"The wide range suggests differences in energy procurement."
+    fig = px.box(
+        df, 
+        y='cost_per_kWh', 
+        title='Distribution of Energy Costs per kWh Across Trusts',
+        color_discrete_sequence=['#ff7f0e']
     )
+    fig.add_hline(y=avg_cost_kwh, line_dash="dash", line_color="red", 
+                  annotation_text=f"Average: £{avg_cost_kwh:.3f}")
+    st.plotly_chart(fig, use_container_width=True)
     
-    # Problem 3: ROI Analysis
-    st.subheader("Problem 3: Return on Investment Analysis")
-    st.markdown("**Given:** Potential savings and estimated implementation costs")
-    st.markdown("**Find:** ROI metrics for energy efficiency investments")
-    
+    # ROI Analysis
+    st.subheader("📈 Return on Investment Analysis")
     typical_investment_per_kwh_saved = 2.5
     investment_cost = df['Potential Energy Saved (kWh)'] * typical_investment_per_kwh_saved
     annual_savings = df['Potential Cost Saved (£)']
@@ -499,95 +610,122 @@ def page_financial(df):
     simple_payback_years = total_investment / total_annual_savings if total_annual_savings > 0 else float('inf')
     roi_percent = (total_annual_savings / total_investment) * 100 if total_investment > 0 else 0
     
-    st.markdown("**Solution:**")
-    st.markdown(f"• Total Investment Required = £{total_investment:,.0f}")
-    st.markdown(f"• Annual Savings Potential = £{total_annual_savings:,.0f}")
-    st.markdown(f"• Simple Payback Period = {simple_payback_years:.1f} years")
-    st.markdown(f"• Annual ROI = {roi_percent:.1f}%")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Investment Required", f"£{total_investment/1e6:,.1f}M")
+    with col2:
+        st.metric("Payback Period", f"{simple_payback_years:.1f} years")
+    with col3:
+        st.metric("Annual ROI", f"{roi_percent:.1f}%")
     
     explain_calculation(
-        "ROI Calculation Method",
+        "ROI Analysis Results",
         "Payback Period = Investment Cost ÷ Annual Savings; ROI = (Annual Savings ÷ Investment) × 100",
-        f"• Investment = {df['Potential Energy Saved (kWh)'].sum():,.0f} kWh × £{typical_investment_per_kwh_saved}",
+        f"• Total investment needed: £{total_investment/1e6:,.1f}M\n• Annual savings potential: £{total_annual_savings/1e6:,.1f}M",
         f"Financial viability assessment",
-        f"A payback period of {simple_payback_years:.1f} years is {'very attractive' if simple_payback_years < 3 else 'reasonable'}."
+        f"A payback period of {simple_payback_years:.1f} years is {'very attractive' if simple_payback_years < 3 else 'reasonable' if simple_payback_years < 5 else 'challenging'} for energy efficiency investments."
     )
-    
-    # Create cost analysis chart
-    st.subheader("Cost Analysis Visualization")
-    fig = px.box(df, y='cost_per_kWh', title='Distribution of Energy Costs per kWh Across Trusts')
-    fig.add_hline(y=avg_cost_kwh, line_dash="dash", line_color="red", 
-                  annotation_text=f"Average: £{avg_cost_kwh:.3f}")
-    fig.add_hline(y=median_cost, line_dash="dash", line_color="green", 
-                  annotation_text=f"Median: £{median_cost:.3f}")
-    st.plotly_chart(fig, use_container_width=True)
-
 
 def page_carbon(df):
     st.title("🌍 Carbon Mathematics")
     st.markdown("**Problem Set:** Carbon emissions analysis and environmental calculations")
     
-    # Problem 1: Carbon Intensity
-    st.subheader("Problem 1: Carbon Intensity Analysis")
-    st.markdown("**Given:** CO₂ emissions and energy consumption data")
-    st.markdown("**Find:** Carbon intensity metrics and totals")
-    
+    # Key Carbon Metrics
     total_co2_tonnes = df['Total CO₂ (tCO₂e)'].sum()
     total_energy_kwh = df['Total Energy (kWh)'].sum()
     avg_co2_per_m2 = df['CO₂ per m² (tCO₂/m²)'].mean()
     carbon_intensity = total_co2_tonnes / (total_energy_kwh / 1000) if total_energy_kwh > 0 else 0
     total_potential_co2_saved = df['Potential CO₂ Saved (tCO₂)'].sum()
     
-    st.markdown("**Solution:**")
-    st.markdown(f"• Total CO₂ Emissions = {total_co2_tonnes:,.0f} tCO₂e")
-    st.markdown(f"• Average CO₂ per m² = {avg_co2_per_m2:.3f} tCO₂e/m²")
-    st.markdown(f"• Carbon Intensity = {carbon_intensity:.3f} tCO₂e/MWh")
-    st.markdown(f"• Potential CO₂ Savings = {total_potential_co2_saved:,.0f} tCO₂e")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total CO₂ Emissions", f"{total_co2_tonnes/1e3:,.1f} ktCO₂e")
+    with col2:
+        st.metric("Carbon Intensity", f"{carbon_intensity:.3f} tCO₂e/MWh")
+    with col3:
+        st.metric("Potential CO₂ Savings", f"{total_potential_co2_saved/1e3:,.1f} ktCO₂e")
+    with col4:
+        st.metric("Avg CO₂ per m²", f"{avg_co2_per_m2:.3f} tCO₂e/m²")
     
-    explain_calculation(
-        "Carbon Intensity Calculation",
-        "Carbon Intensity = Total CO₂ ÷ Total Energy (MWh)",
-        f"• Total CO₂ = {total_co2_tonnes:,.0f} tCO₂e\n• Total Energy = {total_energy_kwh/1000:,.0f} MWh",
-        f"System-wide carbon performance",
-        f"Carbon intensity shows emissions per unit of energy consumed."
+    # Highest Carbon Emitters
+    st.subheader("🏭 Highest Carbon Emitters per m²")
+    carbon_fig, top_carbon = create_top_performers_chart(
+        df, 'CO₂ per m² (tCO₂/m²)', 
+        'Top 10 Trusts by CO₂ Emissions per m²', 
+        'tCO₂e/m²', 
+        ascending=False
     )
+    st.plotly_chart(carbon_fig, use_container_width=True)
     
-    # Problem 2: Carbon Reduction Targets
-    st.subheader("Problem 2: Carbon Reduction Target Analysis")
-    st.markdown("**Given:** Current emissions and NHS Net Zero targets")
-    st.markdown("**Find:** Required reduction rates and target emissions")
+    # Highlight top emitter
+    if len(top_carbon) > 0:
+        top_emitter = top_carbon.iloc[0]
+        st.warning(f"🚨 **Highest carbon emissions**: {top_emitter['Trust Name']} emits {top_emitter['CO₂ per m² (tCO₂/m²)']:,.3f} tCO₂e/m², which is {((top_emitter['CO₂ per m² (tCO₂/m²)'] / avg_co2_per_m2) - 1) * 100:.1f}% above average!")
     
+    # Energy vs Carbon Relationship
+    st.subheader("⚡ Energy vs Carbon Intensity Relationship")
+    scatter_fig = px.scatter(
+        df, 
+        x='Energy per m² (kWh/m²)', 
+        y='CO₂ per m² (tCO₂/m²)', 
+        color='Trust Type' if 'Trust Type' in df.columns else None,
+        size='Gross internal floor area (m²)',
+        title='Energy vs Carbon Intensity by Trust',
+        hover_data=['Trust Name']
+    )
+    st.plotly_chart(scatter_fig, use_container_width=True)
+    
+    # Carbon Reduction Targets
+    st.subheader("🎯 NHS Net Zero Carbon Targets")
     current_year = 2025
     target_year_80 = 2030
     target_year_100 = 2040
     
     years_to_80_target = target_year_80 - current_year
-    years_to_100_target = target_year_100 - current_year
-    
     target_emissions_80 = total_co2_tonnes * 0.2
-    target_emissions_100 = 0
-    
     annual_reduction_80 = (total_co2_tonnes - target_emissions_80) / years_to_80_target
     
-    st.markdown("**Solution:**")
-    st.markdown(f"• Current Emissions = {total_co2_tonnes:,.0f} tCO₂e")
-    st.markdown(f"• 2030 Target (80% reduction) = {target_emissions_80:,.0f} tCO₂e")
-    st.markdown(f"• 2040 Target (100% reduction) = {target_emissions_100:,.0f} tCO₂e")
-    st.markdown(f"• Required Annual Reduction (to 2030) = {annual_reduction_80:,.0f} tCO₂e/year")
+    # Create target visualization
+    years = list(range(current_year, target_year_100 + 1))
+    current_emissions = [total_co2_tonnes] + [0] * (len(years) - 1)
+    target_80_line = []
+    target_100_line = []
     
-    explain_calculation(
-        "Carbon Reduction Mathematics",
-        "Annual Reduction = (Current - Target) ÷ Years",
-        f"• Reduction needed = {total_co2_tonnes - target_emissions_80:,.0f} tCO₂e\n• Time available = {years_to_80_target} years",
-        f"NHS Net Zero pathway requirements",
-        f"The NHS needs to reduce emissions by {(annual_reduction_80/total_co2_tonnes)*100:.1f}% annually."
+    for year in years:
+        if year <= target_year_80:
+            reduction_so_far = (year - current_year) * annual_reduction_80
+            target_80_line.append(max(0, total_co2_tonnes - reduction_so_far))
+        else:
+            target_80_line.append(target_emissions_80)
+        
+        if year <= target_year_100:
+            target_100_line.append(max(0, total_co2_tonnes * (1 - (year - current_year) / (target_year_100 - current_year))))
+        else:
+            target_100_line.append(0)
+    
+    target_fig = go.Figure()
+    target_fig.add_trace(go.Scatter(x=years, y=current_emissions, mode='markers', name='Current Emissions', marker=dict(color='red', size=10)))
+    target_fig.add_trace(go.Scatter(x=years, y=target_80_line, mode='lines', name='80% Reduction Target', line=dict(color='orange', dash='dash')))
+    target_fig.add_trace(go.Scatter(x=years, y=target_100_line, mode='lines', name='Net Zero Target', line=dict(color='green', dash='dot')))
+    
+    target_fig.update_layout(
+        title='NHS Carbon Reduction Pathway',
+        xaxis_title='Year',
+        yaxis_title='CO₂ Emissions (tCO₂e)',
+        height=500
     )
+    st.plotly_chart(target_fig, use_container_width=True)
     
-    # Problem 3: Environmental Impact
-    st.subheader("Problem 3: Environmental Impact Equivalencies")
-    st.markdown("**Given:** CO₂ emissions totals")
-    st.markdown("**Find:** Real-world equivalencies for context")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("2030 Target", f"{target_emissions_80/1e3:,.1f} ktCO₂e", f"-{((total_co2_tonnes - target_emissions_80)/total_co2_tonnes)*100:.0f}%")
+    with col2:
+        st.metric("Annual Reduction Needed", f"{annual_reduction_80/1e3:,.1f} ktCO₂e/year")
+    with col3:
+        st.metric("Reduction Rate", f"{(annual_reduction_80/total_co2_tonnes)*100:.1f}%/year")
     
+    # Environmental Impact Equivalencies
+    st.subheader("🌱 Environmental Impact Context")
     cars_per_tonne_co2 = 0.22
     trees_per_tonne_co2 = 40
     homes_per_tonne_co2 = 0.2
@@ -596,119 +734,155 @@ def page_carbon(df):
     equivalent_trees = total_co2_tonnes * trees_per_tonne_co2
     equivalent_homes = total_co2_tonnes * homes_per_tonne_co2
     
-    st.markdown("**Solution:**")
-    st.markdown(f"• Equivalent to {equivalent_cars:,.0f} cars driven for one year")
-    st.markdown(f"• Would require {equivalent_trees:,.0f} mature trees to offset")
-    st.markdown(f"• Equivalent to {equivalent_homes:,.0f} average homes' annual emissions")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("🚗 Equivalent Cars", f"{equivalent_cars:,.0f}", "driven for 1 year")
+    with col2:
+        st.metric("🌳 Trees Needed", f"{equivalent_trees:,.0f}", "to offset emissions")
+    with col3:
+        st.metric("🏠 Equivalent Homes", f"{equivalent_homes:,.0f}", "annual emissions")
     
     explain_calculation(
-        "Environmental Context Calculations",
-        "Equivalent Units = Total CO₂ × Conversion Factor",
-        f"• Cars: {total_co2_tonnes:,.0f} tCO₂e × {cars_per_tonne_co2} = {equivalent_cars:,.0f} cars",
-        f"Relatable environmental impact scale",
-        "These equivalencies communicate the scale of NHS emissions."
+        "Carbon Reduction Challenge",
+        "Annual Reduction = (Current - Target) ÷ Years Available",
+        f"• Current emissions: {total_co2_tonnes/1e3:,.1f} ktCO₂e\n• 2030 target: {target_emissions_80/1e3:,.1f} ktCO₂e\n• Time available: {years_to_80_target} years",
+        f"NHS must reduce emissions by {(annual_reduction_80/total_co2_tonnes)*100:.1f}% annually",
+        f"This requires unprecedented efficiency improvements and renewable energy adoption across all NHS trusts."
     )
-    
-    # Create carbon distribution chart
-    st.subheader("Carbon Distribution Visualization")
-    fig = px.scatter(df, x='Energy per m² (kWh/m²)', y='CO₂ per m² (tCO₂/m²)', 
-                    color='Trust Type', size='Gross internal floor area (m²)',
-                    title='Energy vs Carbon Intensity by Trust Type')
-    st.plotly_chart(fig, use_container_width=True)
 
 def page_trust_analysis(df):
     st.title("🏥 Trust Performance Analysis")
     st.markdown("**Problem Set:** Individual trust performance and peer comparison")
     
-    # Problem 1: Trust Ranking
-    st.subheader("Problem 1: Trust Performance Ranking")
-    st.markdown("**Given:** Energy efficiency metrics for all trusts")
-    st.markdown("**Find:** Ranking and percentile analysis")
+    # Trust Selection
+    st.subheader("🔍 Select Trust for Detailed Analysis")
+    selected_trust = st.selectbox("Choose a Trust:", df['Trust Name'].unique())
     
-    df_ranked = df.copy()
-    df_ranked['Energy Efficiency Rank'] = df_ranked['Energy per m² (kWh/m²)'].rank(method='min')
-    df_ranked['Energy Efficiency Percentile'] = df_ranked['Energy per m² (kWh/m²)'].rank(pct=True) * 100
-    
-    top_5_efficient = df_ranked.nsmallest(5, 'Energy per m² (kWh/m²)')
-    bottom_5_efficient = df_ranked.nlargest(5, 'Energy per m² (kWh/m²)')
-    
-    st.markdown("**Solution - Top 5 Most Efficient:**")
-    for i, (_, row) in enumerate(top_5_efficient.iterrows(), 1):
-        st.markdown(f"• {i}. {row['Trust Name']}: {row['Energy per m² (kWh/m²)']:.1f} kWh/m²")
-    
-    st.markdown("**Bottom 5 Performers:**")
-    for i, (_, row) in enumerate(bottom_5_efficient.iterrows(), 1):
-        st.markdown(f"• {i}. {row['Trust Name']}: {row['Energy per m² (kWh/m²)']:.1f} kWh/m²")
-    
-    explain_calculation(
-        "Ranking Methodology",
-        "Rank = Position when sorted by Energy per m² (ascending)",
-        f"• Lower energy per m² = better efficiency",
-        f"Peer comparison framework",
-        "Rankings identify best and worst performers for targeted interventions."
-    )
-    
-    # Problem 2: Trust Type Benchmarking
-    st.subheader("Problem 2: Trust Type Benchmarking Analysis")
-    st.markdown("**Given:** Trust performance within peer groups")
-    st.markdown("**Find:** Deviation from peer benchmarks")
-    
-    if 'Trust Type' in df.columns:
-        peer_stats = df.groupby('Trust Type').agg({
-            'Energy per m² (kWh/m²)': ['count', 'mean', 'median', 'std'],
-            'Potential Energy Saved (kWh)': 'sum',
-            'Potential Cost Saved (£)': 'sum'
-        }).round(2)
+    if selected_trust:
+        trust_data = df[df['Trust Name'] == selected_trust].iloc[0]
         
-        st.markdown("**Solution - Peer Group Analysis:**")
-        for trust_type in peer_stats.index:
-            stats = peer_stats.loc[trust_type]
-            count = stats[('Energy per m² (kWh/m²)', 'count')]
-            mean_val = stats[('Energy per m² (kWh/m²)', 'mean')]
-            median_val = stats[('Energy per m² (kWh/m²)', 'median')]
-            std_val = stats[('Energy per m² (kWh/m²)', 'std')]
+        # Trust Overview
+        st.subheader(f"📊 {selected_trust} - Performance Overview")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Energy per m²", f"{trust_data['Energy per m² (kWh/m²)']:,.1f} kWh/m²")
+        with col2:
+            st.metric("Cost per kWh", f"£{trust_data['cost_per_kWh']:.3f}")
+        with col3:
+            st.metric("CO₂ per m²", f"{trust_data['CO₂ per m² (tCO₂/m²)']:,.3f} tCO₂e/m²")
+        with col4:
+            efficiency_label = trust_data['Clustering Efficiency Label']
+            emoji = "🟢" if efficiency_label == "Efficient" else "🟡" if efficiency_label == "Moderate" else "🔴"
+            st.metric("Efficiency Rating", f"{emoji} {efficiency_label}")
+        
+        # Peer Comparison
+        if 'Trust Type' in df.columns:
+            trust_type = trust_data['Trust Type']
+            peer_group = df[df['Trust Type'] == trust_type]
             
-            st.markdown(f"• **{trust_type}** (n={count}): Mean={mean_val:.1f}, Median={median_val:.1f}, Std={std_val:.1f} kWh/m²")
+            st.subheader(f"👥 Peer Comparison - {trust_type}")
+            
+            # Create peer comparison chart
+            peer_metrics = ['Energy per m² (kWh/m²)', 'cost_per_kWh', 'CO₂ per m² (tCO₂/m²)']
+            
+            fig = make_subplots(
+                rows=1, cols=3,
+                subplot_titles=('Energy per m²', 'Cost per kWh', 'CO₂ per m²'),
+                specs=[[{"secondary_y": False}, {"secondary_y": False}, {"secondary_y": False}]]
+            )
+            
+            for i, metric in enumerate(peer_metrics, 1):
+                # Box plot for peer group
+                fig.add_trace(
+                    go.Box(y=peer_group[metric], name=f'{trust_type} Peers', showlegend=False),
+                    row=1, col=i
+                )
+                # Highlight selected trust
+                fig.add_trace(
+                    go.Scatter(
+                        x=[0], y=[trust_data[metric]], 
+                        mode='markers', 
+                        marker=dict(color='red', size=15, symbol='star'),
+                        name=selected_trust if i == 1 else None,
+                        showlegend=True if i == 1 else False
+                    ),
+                    row=1, col=i
+                )
+            
+            fig.update_layout(height=400, title_text=f"{selected_trust} vs {trust_type} Peers")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Peer statistics
+            peer_stats = peer_group[peer_metrics].describe()
+            
+            st.markdown("**Peer Group Statistics:**")
+            for metric in peer_metrics:
+                trust_value = trust_data[metric]
+                peer_median = peer_stats.loc['50%', metric]
+                peer_mean = peer_stats.loc['mean', metric]
+                percentile = (peer_group[metric] <= trust_value).mean() * 100
+                
+                if metric == 'Energy per m² (kWh/m²)':
+                    unit = "kWh/m²"
+                elif metric == 'cost_per_kWh':
+                    unit = "£/kWh"
+                else:
+                    unit = "tCO₂e/m²"
+                
+                performance = "better" if (metric == 'Energy per m² (kWh/m²)' or metric == 'cost_per_kWh' or metric == 'CO₂ per m² (tCO₂/m²)') and trust_value < peer_median else "worse"
+                
+                st.markdown(f"• **{metric}**: {trust_value:.3f} {unit} (Peer median: {peer_median:.3f}, {percentile:.0f}th percentile - {performance} than median)")
         
-        explain_calculation(
-            "Peer Group Benchmarking",
-            "Deviation = Individual Value - Peer Median",
-            f"• Each trust compared to same trust type peers",
-            f"Fair comparison methodology",
-            "Comparing trusts to similar peer types is more fair."
-        )
+        # Improvement Opportunities
+        st.subheader("💡 Improvement Opportunities")
+        
+        potential_energy_saved = trust_data['Potential Energy Saved (kWh)']
+        potential_cost_saved = trust_data['Potential Cost Saved (£)']
+        potential_co2_saved = trust_data['Potential CO₂ Saved (tCO₂)']
+        
+        if potential_energy_saved > 0:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Energy Savings Potential", f"{potential_energy_saved:,.0f} kWh")
+            with col2:
+                st.metric("Cost Savings Potential", f"£{potential_cost_saved:,.0f}")
+            with col3:
+                st.metric("CO₂ Savings Potential", f"{potential_co2_saved:,.1f} tCO₂e")
+            
+            st.success(f"💰 **{selected_trust}** could save £{potential_cost_saved:,.0f} annually and reduce CO₂ emissions by {potential_co2_saved:,.1f} tonnes through energy efficiency improvements!")
+        else:
+            st.info(f"✅ **{selected_trust}** is already performing at or above its peer benchmark!")
     
-    # Problem 3: Improvement Potential
-    st.subheader("Problem 3: Individual Trust Improvement Potential")
-    st.markdown("**Given:** Current performance vs benchmarks")
-    st.markdown("**Find:** Specific improvement opportunities")
+    # Trust Rankings
+    st.subheader("🏆 Trust Performance Rankings")
     
-    if len(df) > 0:
-        sample_trust = df.iloc[0]
-        
-        trust_name = sample_trust['Trust Name']
-        trust_type = sample_trust.get('Trust Type', 'N/A')
-        current_energy = sample_trust['Energy per m² (kWh/m²)']
-        target_energy = sample_trust['Target Energy per m²']
-        potential_savings_kwh = sample_trust['Potential Energy Saved (kWh)']
-        potential_savings_cost = sample_trust['Potential Cost Saved (£)']
-        
-        improvement_percent = ((current_energy - target_energy) / target_energy) * 100 if target_energy > 0 else 0
-        
-        st.markdown(f"**Sample Analysis - {trust_name}:**")
-        st.markdown(f"• Trust Type: {trust_type}")
-        st.markdown(f"• Current Performance: {current_energy:.1f} kWh/m²")
-        st.markdown(f"• Peer Benchmark: {target_energy:.1f} kWh/m²")
-        st.markdown(f"• Performance Gap: {improvement_percent:.1f}% above benchmark")
-        st.markdown(f"• Potential Savings: {potential_savings_kwh:,.0f} kWh = £{potential_savings_cost:,.0f}")
-        
-        explain_calculation(
-            "Individual Trust Analysis",
-            "Improvement % = ((Current - Target) ÷ Target) × 100",
-            f"• Current = {current_energy:.1f} kWh/m²\n• Target = {target_energy:.1f} kWh/m²",
-            f"Specific improvement opportunity",
-            f"This trust {'performs above' if improvement_percent > 0 else 'performs at or below'} its peer benchmark."
-        )
+    # Create ranking dataframe
+    ranking_df = df.copy()
+    ranking_df['Energy Rank'] = ranking_df['Energy per m² (kWh/m²)'].rank(method='min')
+    ranking_df['Cost Rank'] = ranking_df['cost_per_kWh'].rank(method='min')
+    ranking_df['Carbon Rank'] = ranking_df['CO₂ per m² (tCO₂/m²)'].rank(method='min')
+    ranking_df['Overall Rank'] = (ranking_df['Energy Rank'] + ranking_df['Cost Rank'] + ranking_df['Carbon Rank']) / 3
+    
+    # Top performers
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**🌟 Top 5 Overall Performers:**")
+        top_performers = ranking_df.nsmallest(5, 'Overall Rank')
+        for i, (_, row) in enumerate(top_performers.iterrows(), 1):
+            st.markdown(f"{i}. **{row['Trust Name']}** (Rank: {row['Overall Rank']:.1f})")
+    
+    with col2:
+        st.markdown("**⚠️ Bottom 5 Performers:**")
+        bottom_performers = ranking_df.nlargest(5, 'Overall Rank')
+        for i, (_, row) in enumerate(bottom_performers.iterrows(), 1):
+            st.markdown(f"{i}. **{row['Trust Name']}** (Rank: {row['Overall Rank']:.1f})")
+    
+    # Correlation Analysis
+    st.subheader("🔗 Performance Correlation Analysis")
+    corr_fig = create_correlation_heatmap(df)
+    st.plotly_chart(corr_fig, use_container_width=True)
 
 def page_ai_analysis():
     st.title("🤖 AI-Justified Analysis")
@@ -749,6 +923,18 @@ def page_ai_analysis():
             return 50
 
         df["energy_score"] = df.apply(lambda row: get_percentile_score(row, df), axis=1)
+
+        # Site overview metrics
+        st.subheader("📊 Dataset Overview")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Sites", len(df))
+        with col2:
+            st.metric("Avg Energy Score", f"{df['energy_score'].mean():.1f}/100")
+        with col3:
+            st.metric("Total Energy", f"{df['total_energy_kwh'].sum()/1e6:,.1f} GWh")
+        with col4:
+            st.metric("Avg Energy/m²", f"{df['energy_per_m2'].mean():,.1f} kWh/m²")
 
         # Gemini AI Prompt
         def infer_services_gemini(row):
@@ -799,131 +985,214 @@ Other Info:
             except Exception as e:
                 return f"Error in AI analysis: {str(e)}"
 
-        # Streamlit UI: Site Selection
-        site_name = st.selectbox("Select NHS Site", df["Site Name"].unique())
-        selected_row = df[df["Site Name"] == site_name].iloc[0]
-        site_energy = selected_row["total_energy_kwh"]
-        energy_per_m2 = selected_row["energy_per_m2"]
-        score = selected_row["energy_score"]
+        # Site Selection with Search
+        st.subheader("🔍 Site Analysis")
         
-        with st.spinner("Generating AI analysis..."):
-            justification = infer_services_gemini(selected_row)
+        # Search functionality
+        search_term = st.text_input("🔎 Search for a site:", placeholder="Type site name...")
+        
+        if search_term:
+            filtered_sites = df[df['Site Name'].str.contains(search_term, case=False, na=False)]['Site Name'].unique()
+            if len(filtered_sites) > 0:
+                site_name = st.selectbox("Select from search results:", filtered_sites)
+            else:
+                st.warning("No sites found matching your search.")
+                site_name = st.selectbox("Select NHS Site:", df["Site Name"].unique())
+        else:
+            site_name = st.selectbox("Select NHS Site:", df["Site Name"].unique())
+        
+        if site_name:
+            selected_row = df[df["Site Name"] == site_name].iloc[0]
+            site_energy = selected_row["total_energy_kwh"]
+            energy_per_m2 = selected_row["energy_per_m2"]
+            score = selected_row["energy_score"]
+            
+            # Site metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Site", site_name)
+            with col2:
+                st.metric("Total Energy", f"{int(site_energy):,} kWh")
+            with col3:
+                st.metric("Energy per m²", f"{energy_per_m2:,.1f} kWh/m²")
+            with col4:
+                score_color = "🟢" if score <= 30 else "🟡" if score <= 70 else "🔴"
+                st.metric("Energy Score", f"{score_color} {score}/100")
+            
+            # Generate AI analysis
+            with st.spinner("🤖 Generating AI analysis..."):
+                justification = infer_services_gemini(selected_row)
 
-        # Display Results
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Site", site_name)
-        col2.metric("Total Energy (kWh)", f"{int(site_energy):,}")
-        col3.metric("Energy Score (per m² in Trust Type)", f"{score} / 100")
-
-        st.markdown("### Gemini-Inferred Service Summary")
-        st.info(justification)
+            # Display Results
+            st.subheader("🤖 AI Analysis Results")
+            st.info(justification)
+            
+            # Additional site details
+            with st.expander("📋 Detailed Site Information"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Infrastructure:**")
+                    st.markdown(f"• Floor Area: {selected_row.get('Gross internal floor area (m²)', 0):,.0f} m²")
+                    st.markdown(f"• Pathology: {selected_row.get('Pathology (m²)', 0):,.0f} m²")
+                    st.markdown(f"• CSSD: {selected_row.get('Clinical Sterile Services Dept. (CSSD) (m²)', 0):,.0f} m²")
+                    st.markdown(f"• Isolation Rooms: {selected_row.get('Isolation rooms (No.)', 0):,.0f}")
+                    st.markdown(f"• En-suite Beds: {selected_row.get('Single bedrooms for patients with en-suite facilities (No.)', 0):,.0f}")
+                
+                with col2:
+                    st.markdown("**Support Services:**")
+                    st.markdown(f"• 999 Contact Centre: {selected_row.get('999 Contact Centre (m²)', 0):,.0f} m²")
+                    st.markdown(f"• Ambulance Station: {selected_row.get('Ambulance Station (m²)', 0):,.0f} m²")
+                    st.markdown(f"• Staff Accommodation: {selected_row.get('Staff Accommodation (m²)', 0):,.0f} m²")
+                    st.markdown(f"• Medical Records: {selected_row.get('Medical records (m²)', 0):,.0f} m²")
+                    st.markdown(f"• Restaurants/Cafés: {selected_row.get('Restaurants and cafés (m²)', 0):,.0f} m²")
+        
+        # Energy Score Distribution
+        st.subheader("📊 Energy Score Distribution Across All Sites")
+        score_fig = px.histogram(
+            df, 
+            x='energy_score', 
+            nbins=20,
+            title='Distribution of Energy Scores (0=Most Efficient, 100=Least Efficient)',
+            color_discrete_sequence=['#1f77b4']
+        )
+        score_fig.add_vline(x=df['energy_score'].mean(), line_dash="dash", line_color="red", 
+                           annotation_text=f"Average: {df['energy_score'].mean():.1f}")
+        st.plotly_chart(score_fig, use_container_width=True)
+        
     else:
-        st.warning("Please upload a valid NHS site data file to begin.")
+        st.warning("⚠️ Please upload a valid NHS site data file to begin analysis.")
 
 # -------------------------------------
 # Main Application
 # -------------------------------------
 def main():
-    st.set_page_config(page_title="NHS Energy Analysis", layout="wide")
+    st.set_page_config(
+        page_title="NHS Energy Analysis", 
+        layout="wide",
+        page_icon="🏥",
+        initial_sidebar_state="expanded"
+    )
     
-
+    # Custom CSS for better UI
     st.markdown("""
-<style>
-/* MAIN BACKGROUND AND TEXT */
-body, .main, .block-container {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-}
-
-/* SIDEBAR */
-[data-testid="stSidebar"] {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-}
-
-/* HEADINGS AND PARAGRAPH TEXT */
-h1, h2, h3, h4, h5, h6, p, div, span, label {
-    color: #000000 !important;
-}
-
-/* INPUT FIELDS */
-input, select, textarea {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-    border: 1px solid #000000 !important;
-}
-
-/* SELECTBOX / DROPDOWN (combobox) */
-div[role="combobox"] {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-    border: 1px solid #000000 !important;
-    border-radius: 6px;
-    padding: 0.25rem;
-}
-
-/* DROPDOWN OPTIONS */
-ul[role="listbox"] {
-    background-color: #FFFFFF !important;
-    color: #FFFFFF !important;
-    border: 1px solid #CCC !important;
-}
-
-/* DROPDOWN OPTION HOVER */
-ul[role="listbox"] > li:hover {
-    background-color: #f0f0f0 !important;
-    color: #FFFFFF !important;
-}
-
-/* BUTTONS */
-.stButton > button {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-    border: 1px solid #000000 !important;
-}
-.stButton > button:hover {
-    background-color: #f0f0f0 !important;
-}
-
-/* FILE UPLOADER DROPZONES */
-section[data-testid="stFileUploaderDropzone"] {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-    border: 2px dashed #000000 !important;
-}
-
-/* ALERT BOXES */
-.stAlert {
-    background-color: #f0f0f0 !important;
-    color: #000000 !important;
-    border: 1px solid #000000 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
+    <style>
+    /* Main styling */
+    .main {
+        padding-top: 1rem;
+    }
+    
+    /* Sidebar styling */
+    .css-1d391kg {
+        padding-top: 1rem;
+    }
+    
+    /* Metric cards */
+    [data-testid="metric-container"] {
+        background-color: #f0f2f6;
+        border: 1px solid #e0e0e0;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Info boxes */
+    .stAlert {
+        border-radius: 0.5rem;
+    }
+    
+    /* Headers */
+    h1 {
+        color: #1f77b4;
+        border-bottom: 2px solid #1f77b4;
+        padding-bottom: 0.5rem;
+    }
+    
+    h2 {
+        color: #2c3e50;
+        margin-top: 2rem;
+    }
+    
+    h3 {
+        color: #34495e;
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        border-radius: 0.5rem;
+        border: none;
+        background: linear-gradient(90deg, #1f77b4, #2c3e50);
+        color: white;
+        font-weight: bold;
+    }
+    
+    .stButton > button:hover {
+        background: linear-gradient(90deg, #2c3e50, #1f77b4);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    
+    /* Selectbox */
+    .stSelectbox > div > div {
+        border-radius: 0.5rem;
+    }
+    
+    /* File uploader */
+    .stFileUploader > div {
+        border-radius: 0.5rem;
+        border: 2px dashed #1f77b4;
+    }
+    
+    /* Progress bars */
+    .stProgress > div > div {
+        background: linear-gradient(90deg, #1f77b4, #2c3e50);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Header
+    st.markdown("""
+    <div style="text-align: center; padding: 1rem; background: linear-gradient(90deg, #1f77b4, #2c3e50); border-radius: 0.5rem; margin-bottom: 2rem;">
+        <h1 style="color: white; margin: 0; border: none;">🏥 NHS Energy Analysis Platform</h1>
+        <p style="color: white; margin: 0; font-size: 1.2rem;">Mathematical Analysis & AI-Powered Insights</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Sidebar navigation
-    st.sidebar.title("Navigation")
+    st.sidebar.markdown("## 🧭 Navigation")
     pages = {
-        "Data Preprocessing": page_data_preprocessing,
-        "Mathematical Overview": page_overview,
-        "Energy Analysis": page_energy,
-        "Financial Analysis": page_financial,
-        "Carbon Analysis": page_carbon,
-        "Trust Analysis": page_trust_analysis,
-        "AI-Justified Analysis": page_ai_analysis
+        "📊 Data Preprocessing": page_data_preprocessing,
+        "📈 Mathematical Overview": page_overview,
+        "⚡ Energy Analysis": page_energy,
+        "💰 Financial Analysis": page_financial,
+        "🌍 Carbon Analysis": page_carbon,
+        "🏥 Trust Analysis": page_trust_analysis,
+        "🤖 AI-Justified Analysis": page_ai_analysis
     }
     
     selected_page = st.sidebar.selectbox("Select Analysis Page", list(pages.keys()))
     
+    # Add sidebar info
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ℹ️ About")
+    st.sidebar.info("""
+    This platform provides comprehensive mathematical analysis of NHS Trust energy performance with:
+    
+    • 📊 Statistical calculations
+    • 📈 Performance benchmarking  
+    • 💰 Financial impact analysis
+    • 🌍 Carbon footprint assessment
+    • 🤖 AI-powered insights
+    """)
+    
     # Check if data is processed for non-preprocessing pages
-    if selected_page != "Data Preprocessing" and selected_page != "AI-Justified Analysis" and 'processed_data' not in st.session_state:
-        st.warning("Please process data first using the Data Preprocessing page.")
+    if selected_page not in ["📊 Data Preprocessing", "🤖 AI-Justified Analysis"] and 'processed_data' not in st.session_state:
+        st.warning("⚠️ Please process data first using the **Data Preprocessing** page.")
+        st.info("👈 Use the sidebar to navigate to Data Preprocessing and upload your ERIC data files.")
         return
     
     # Run selected page
-    if selected_page == "Data Preprocessing" or selected_page == "AI-Justified Analysis":
+    if selected_page in ["📊 Data Preprocessing", "🤖 AI-Justified Analysis"]:
         pages[selected_page]()
     else:
         pages[selected_page](st.session_state.processed_data)
