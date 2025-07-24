@@ -135,20 +135,20 @@ def load_data_from_github(url):
         return df
         
     except requests.exceptions.RequestException as e:
-        st.error(f"❌ Network error loading data: {str(e)}")
+        st.error(f"Network error loading data: {str(e)}")
         return None
     except pd.errors.EmptyDataError:
-        st.error("❌ The CSV file appears to be empty")
+        st.error(" The CSV file appears to be empty")
         return None
     except pd.errors.ParserError as e:
-        st.error(f"❌ Error parsing CSV file: {str(e)}")
+        st.error(f" Error parsing CSV file: {str(e)}")
         return None
     except Exception as e:
-        st.error(f"❌ Unexpected error loading data: {str(e)}")
+        st.error(f" Unexpected error loading data: {str(e)}")
         return None
 
 def page_data_preprocessing():
-    st.title("🔄 Data Preprocessing")
+    st.title(" Data Preprocessing")
     st.markdown("""
     **Purpose:**  
     Load ERIC Site and Trust data from GitHub, merge them, aggregate site-level data to trust-level, and compute KPIs for energy analysis.
@@ -178,7 +178,7 @@ def page_data_preprocessing():
         trust_data = load_data_from_github(trust_csv_url)
 
     if site_data is None or trust_data is None:
-        st.error("❌ Failed to load one or both datasets from GitHub.")
+        st.error(" Failed to load one or both datasets from GitHub.")
         st.markdown("""
         **Troubleshooting Tips:**
         - Check if the GitHub repository is public
@@ -375,11 +375,11 @@ def page_data_preprocessing():
             )
 
     except Exception as e:
-        st.error(f"❌ Error during processing: {str(e)}")
+        st.error(f"Error during processing: {str(e)}")
         st.exception(e)  # This will show the full traceback for debugging
 
 def page_dashboard(df):
-    st.title("🏥 NHS Energy Dashboard")
+    st.title(" NHS Energy Dashboard")
     
     st.markdown("""
     Welcome to the **NHS Trust Energy Dashboard** — a unified view of energy efficiency, cost-saving opportunities, and carbon intensity across NHS Trusts.
@@ -444,7 +444,7 @@ def page_dashboard(df):
             st.metric("Total Potential Savings", f"£{df['Potential Cost Saved (£)'].sum():,.0f}")
 
     # Bar chart: Energy by Trust Type
-    st.subheader("⚡ Average Energy Usage by Trust Type")
+    st.subheader(" Average Energy Usage by Trust Type")
     if 'Trust Type' in df.columns:
         energy_by_type = df.groupby('Trust Type')['Energy per m² (kWh/m²)'].agg(['mean', 'count']).round(1)
         energy_by_type.columns = ['Average Energy per m²', 'Number of Trusts']
@@ -914,7 +914,7 @@ def page_overview(df):
 
 
 def page_energy(df):
-    st.title("⚡️ Energy Analysis")
+    st.title("Energy Analysis")
     st.markdown("""
     **Purpose:**  
     Analyzes energy consumption patterns with central tendency, variability, and trust type analysis.
