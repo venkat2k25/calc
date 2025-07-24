@@ -1,0 +1,7 @@
+streamlit>=1.32.0
+pandas>=2.2.0
+numpy>=1.24.0
+plotly>=5.20.0
+fpdf>=1.7.2
+google-generativeai>=0.3.2
+requests>=2.31.0
